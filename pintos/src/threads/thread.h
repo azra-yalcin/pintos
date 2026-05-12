@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/fixed-point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +24,9 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* Max depth for nested priority donation chain. */
+#define DONATION_DEPTH 8
 
 /* A kernel thread or user process.
 
@@ -87,11 +91,24 @@ struct thread
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Priority. */
+    int priority;                       /* Effective priority (donation included). */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+
+    /* Priority donation fields. */
+    int base_priority;                  /* Base priority, independent of donation. */
+    struct lock *lock_waiting;          /* Lock this thread is waiting for; NULL if none. */
+    struct list locks_held;             /* List of locks held by this thread. */
+
+    /* Alarm clock fields. */
+    int64_t wake_tick;                  /* Tick at which this thread should wake up. */
+    struct list_elem sleep_elem;        /* List element for sleep_list. */
+
+    /* 4.4BSD scheduler fields. */
+    int nice;                           /* Nice value [-20, 20]. */
+    fixed_point_t recent_cpu;          /* Recent CPU usage (fixed-point). */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
