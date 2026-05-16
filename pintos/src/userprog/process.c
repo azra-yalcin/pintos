@@ -107,13 +107,17 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  /* ÖNEMLİ: Bu geçici bir çözümdür.
-     Çocuk süreç çalışıp ekrana yazısını basabilsin diye ana thread'i 
-     burada sonsuz döngüye sokarak zaman kazanıyoruz. */
-  while (1) 
+  /* Ana thread'in önceliğini en düşüğe (0) çekiyoruz.
+     Böylece Hazır Kuyruğunda (ready_list) bekleyen çocuk thread (args-none)
+     en yüksek öncelikli hale gelecek ve işlemciyi anında kapacaktır. */
+  thread_current ()->priority = 0;
+
+  /* Çocuk thread'in çalışıp işini bitirmesi için geniş bir zaman tanıyoruz */
+  for (int i = 0; i < 500; i++) 
     {
       thread_yield ();
     }
+
   return -1;
 }
 
