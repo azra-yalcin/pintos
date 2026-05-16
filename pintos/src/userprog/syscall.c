@@ -42,34 +42,55 @@ syscall_init (void)
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
+#include "threads/vaddr.h" /* Üstte yoksa kesinlikle ekle */
+
+/* Adresin kullanıcı alanında ve geçerli olup olmadığını kontrol eden yardımcı fonksiyon */
+static void
+check_valid_ptr (const void *vaddr)
+{
+  /* 1. İşaretçi NULL mı?
+     2. İşaretçi çekirdek (Kernel) alanını mı gösteriyor? (is_user_vaddr kontrolü)
+     3. Bu adres sayfa tablosunda haritalanmış mı? */
+  if (vaddr == NULL || !is_user_vaddr (vaddr) || pagedir_get_page (thread_current ()->pagedir, vaddr) == NULL)
+    {
+      sys_exit (-1); /* Eğer hileli/kötü bir adres ise işlemi derhal -1 ile öldür */
+    }
+}
+
 static void
 syscall_handler (struct intr_frame *f UNUSED)
 {
-  /* Kullanıcı yığından (f->esp) sistem çağrısı numarasını alıyoruz */
+  /* ÖNEMLİ: Önce f->esp adresinin kendisi güvenli mi diye bakıyoruz */
+  check_valid_ptr (f->esp);
+
   int syscall_num = *(int *)f->esp;
 
   switch (syscall_num)
     {
     case SYS_EXIT:
       {
-        /* exit çağrısının 1 tane argümanı vardır (çıkış kodu). f->esp + 1 adresindedir. */
+        check_valid_ptr (f->esp + 4);
         int status = *(int *)(f->esp + 4);
         sys_exit (status);
         break;
       }
     case SYS_WRITE:
       {
-        /* write çağrısının 3 argümanı vardır: fd, buffer, size. f->esp + 1, +2, +3 sırasıyla dizilir. */
+        check_valid_ptr (f->esp + 4);
+        check_valid_ptr (f->esp + 8);
+        check_valid_ptr (f->esp + 12);
+
         int fd = *(int *)(f->esp + 4);
         const void *buffer = *(char **)(f->esp + 8);
         unsigned size = *(unsigned *)(f->esp + 12);
         
-        /* f->eax çekirdeğin kullanıcı programına döndüreceği cevap değeridir (Dönen bayt sayısı) */
+        /* Buffer'ın işaret ettiği string'in içeriği de güvenli mi kontrolü */
+        check_valid_ptr (buffer);
+
         f->eax = sys_write (fd, buffer, size);
         break;
       }
     default:
-      printf ("Bilinmeyen sistem çağrısı: %d\n", syscall_num);
       sys_exit (-1);
     }
 }
