@@ -225,6 +225,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
+   /* load fonksiyonunun en başına ekle */
+printf ("#### DEBUG: load fonksiyonuna gelen file_name = '%s'\n", file_name);
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
@@ -258,6 +260,18 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Open executable file. */
   /* DİKKAT: Artık file_name değil, ayıkladığımız fn_name'i açıyoruz! */
   file = filesys_open (fn_name);
+  /* file = filesys_open (fn_name); satırının hemen altına ekle */
+  printf ("#### DEBUG: Ayıklanan fn_name = '%s'\n", fn_name);
+  if (file == NULL) 
+    {
+      printf ("#### DEBUG: DOSYA ACILAMADI! filesys_open NULL dondu.\n");
+      printf ("load: %s: open failed\n", file_name);
+      goto done; 
+    }
+  else 
+    {
+      printf ("#### DEBUG: DOSYA BASARIYLA ACILDI!\n");
+    }
   
   /* İşimiz bittiği için geçici kopyayı hemen silebiliriz */
   palloc_free_page (file_name_copy);
