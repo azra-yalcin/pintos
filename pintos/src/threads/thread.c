@@ -12,7 +12,6 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/fixed-point.h"
-#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -143,7 +142,7 @@ thread_start (void)
 void
 thread_tick (void) 
 {
-  struct thread *t = thread_current ();  /* önce tanımla */
+  struct thread *t = thread_current ();
 
   /* Update statistics. */
   if (t == idle_thread)
@@ -167,6 +166,7 @@ thread_tick (void)
         {
           int ready_threads = (int) list_size (&ready_list)
                               + (t != idle_thread ? 1 : 0);
+          /* load_avg = (59/60)*load_avg + (1/60)*ready_threads */
           load_avg = fp_add (
             fp_mul (fp_div (fp_from_int (59), fp_from_int (60)), load_avg),
             fp_mul_int (fp_div (fp_from_int (1), fp_from_int (60)),
@@ -174,6 +174,7 @@ thread_tick (void)
           thread_foreach (mlfqs_update_recent_cpu, NULL);
           thread_foreach (mlfqs_update_priority, NULL);
         }
+      /* Every 4 ticks: recalculate all priorities (skip if already done). */
       else if (timer_ticks () % TIME_SLICE == 0)
         thread_foreach (mlfqs_update_priority, NULL);
     }
@@ -182,6 +183,7 @@ thread_tick (void)
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
 }
+
 /* Prints thread statistics. */
 void
 thread_print_stats (void) 
@@ -459,15 +461,11 @@ thread_get_recent_cpu (void)
 
 /* Recalculate a thread's MLFQS priority:
    priority = PRI_MAX - (recent_cpu / 4) - (nice * 2) */
-/* Recalculate a thread's MLFQS priority:
-   priority = PRI_MAX - (recent_cpu / 4) - (nice * 2) */
 static void
 mlfqs_update_priority (struct thread *t, void *aux UNUSED)
 {
-  /* idle_thread henüz initialize edilmediyse veya t direkt idle_thread ise işlem yapma */
-  if (idle_thread != NULL && t == idle_thread)
+  if (t == idle_thread)
     return;
-    
   int p = PRI_MAX
           - fp_to_int_zero (fp_div_int (t->recent_cpu, 4))
           - t->nice * 2;
@@ -479,10 +477,8 @@ mlfqs_update_priority (struct thread *t, void *aux UNUSED)
 static void
 mlfqs_update_recent_cpu (struct thread *t, void *aux UNUSED)
 {
-  /* idle_thread henüz initialize edilmediyse veya t direkt idle_thread ise işlem yapma */
-  if (idle_thread != NULL && t == idle_thread)
+  if (t == idle_thread)
     return;
-    
   fixed_point_t two_load = fp_mul_int (load_avg, 2);
   fixed_point_t coeff = fp_div (two_load, fp_add_int (two_load, 1));
   t->recent_cpu = fp_add_int (fp_mul (coeff, t->recent_cpu), t->nice);
