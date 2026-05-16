@@ -31,36 +31,26 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  /* 1. FILE_NAME'in kopyasını oluştur (Bu kısım aynı kalıyor) */
+  /* 1. Tüm komut satırını tutacak kopyayı oluştur (start_process'e gidecek) */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* 2. PROGRAM ADINI AYIKLAMAK İÇİN EKLEYECEĞİN KISIM */
-  char *fn_name;      /* Sadece program adını tutacak (Örn: "echo") */
-  char *save_ptr;     /* strtok_r için gerekli güvenli işaretçi */
+  /* 2. PROGRAM ADINI AYIKLAMAK İÇİN LOCAL ARRAY KULLANIYORUZ */
+  char fn_name[128]; /* Maksimum dosya adı uzunluğu */
+  char *save_ptr;
 
-  /* file_name'i doğrudan değiştiremeyiz (const çünkü), o yüzden fn_copy'den 
-     ya da geçici bir kopyadan ilk kelimeyi çekmeliyiz. */
-  char *file_name_copy = palloc_get_page(0);
-  if (file_name_copy == NULL) {
-    palloc_free_page(fn_copy);
-    return TID_ERROR;
-  }
-  strlcpy(file_name_copy, file_name, PGSIZE);
+  /* file_name'den ilk kelimeyi (program adını) güvenle çekiyoruz */
+  strlcpy (fn_name, file_name, sizeof fn_name);
+  char *first_word = strtok_r (fn_name, " ", &save_ptr);
 
-  /* İlk boşluğa kadar olan kısmı (program adını) alıyoruz */
-  fn_name = strtok_r (file_name_copy, " ", &save_ptr);
-
-  /* 3. ARTIK THREAD_CREATE'E TÜM STRING'I DEĞİL, SADECE PROGRAM ADINI VERİYORUZ */
-  tid = thread_create (fn_name, PRI_DEFAULT, start_process, fn_copy);
-
-  /* İşimiz bittiğinde geçici kopyayı serbest bırakıyoruz */
-  palloc_free_page(file_name_copy);
+  /* 3. THREAD_CREATE'E ARTIK GÜVENLİ VE SİLİNMEYEN ADI VERİYORUZ */
+  tid = thread_create (first_word, PRI_DEFAULT, start_process, fn_copy);
 
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+
   return tid;
 }
 
@@ -119,7 +109,7 @@ process_wait (tid_t child_tid UNUSED)
     }
 
   return -1;
-}
+} 
 
 /* Free the current process's resources. */
 void
