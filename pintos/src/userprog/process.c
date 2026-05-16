@@ -20,6 +20,7 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool push_arguments (const char *file_name, void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -90,10 +91,7 @@ start_process (void *file_name_)
    exception), returns -1.  If TID is invalid or if it was not a
    child of the calling process, or if process_wait() has already
    been successfully called for the given TID, returns -1
-   immediately, without waiting.
-
-   This function will be implemented in problem 2-2.  For now, it
-   does nothing. */
+   immediately, without waiting. */
 int
 process_wait (tid_t child_tid UNUSED) 
 {
@@ -123,13 +121,6 @@ process_exit (void)
   pd = cur->pagedir;
   if (pd != NULL) 
     {
-      /* Correct ordering here is crucial.  We must set
-         cur->pagedir to NULL before switching page directories,
-         so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
-         directory before destroying the process's page
-         directory, or our active page directory will be one
-         that's been freed (and cleared). */
       cur->pagedir = NULL;
       pagedir_activate (NULL);
       pagedir_destroy (pd);
@@ -151,7 +142,7 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
+
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 
@@ -225,12 +216,6 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-   /* load fonksiyonunun en başına ekle */
-printf ("#### DEBUG: load fonksiyonuna gelen file_name = '%s'\n", file_name);
-static bool
-/* load fonksiyonundan önce push_arguments fonksiyonunun varlığını derleyiciye bildiriyoruz */
-static bool push_arguments (const char *file_name, void **esp);
-
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
@@ -365,7 +350,7 @@ done:
   file_close (file);
   return success;
 }
-
+
 /* load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);
@@ -403,11 +388,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
   if (phdr->p_vaddr + phdr->p_memsz < phdr->p_vaddr)
     return false;
 
-  /* Disallow mapping page 0.
-     Not only is it a bad idea to map page 0, but if we allowed
-     it then user code that passed a null pointer to system calls
-     could quite likely panic the kernel by way of null pointer
-     assertions in memcpy(), etc. */
+  /* Disallow mapping page 0. */
   if (phdr->p_vaddr < PGSIZE)
     return false;
 
@@ -416,19 +397,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
-   UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
-   memory are initialized, as follows:
-
-        - READ_BYTES bytes at UPAGE must be read from FILE
-          starting at offset OFS.
-
-        - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
-
-   The pages initialized by this function must be writable by the
-   user process if WRITABLE is true, read-only otherwise.
-
-   Return true if successful, false if a memory allocation error
-   or disk read error occurs. */
+   UPAGE. */
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
@@ -440,18 +409,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) 
     {
-      /* Calculate how to fill this page.
-         We will read PAGE_READ_BYTES bytes from FILE
-         and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
       uint8_t *kpage = palloc_get_page (PAL_USER);
       if (kpage == NULL)
         return false;
 
-      /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
           palloc_free_page (kpage);
@@ -459,14 +423,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
-      /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
           palloc_free_page (kpage);
           return false; 
         }
 
-      /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
@@ -495,21 +457,74 @@ setup_stack (void **esp)
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
-   virtual address KPAGE to the page table.
-   If WRITABLE is true, the user process may modify the page;
-   otherwise, it is read-only.
-   UPAGE must not already be mapped.
-   KPAGE should probably be a page obtained from the user pool
-   with palloc_get_page().
-   Returns true on success, false if UPAGE is already mapped or
-   if memory allocation fails. */
+   virtual address KPAGE to the page table. */
 static bool
 install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();
 
-  /* Verify that there's not already a page at that virtual
-     address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/* --- MOTOR FONKSİYON: ARGÜMANLARI STACK'E DİZEN KISIM --- */
+static bool
+push_arguments (const char *file_name, void **esp)
+{
+  char *token;
+  char *save_ptr;
+  int argc = 0;
+  char *argv[64]; 
+  uint32_t argv_addr[64];
+
+  char *cmd_copy = palloc_get_page (0);
+  if (cmd_copy == NULL)
+    return false;
+  strlcpy (cmd_copy, file_name, PGSIZE);
+
+  for (token = strtok_r (cmd_copy, " ", &save_ptr); token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+    {
+      argv[argc] = token;
+      argc++;
+      if (argc >= 64)
+        break;
+    }
+
+  for (int i = argc - 1; i >= 0; i--)
+    {
+      size_t len = strlen (argv[i]) + 1;
+      *esp -= len;
+      memcpy (*esp, argv[i], len);
+      argv_addr[i] = (uint32_t)*esp;
+    }
+
+  uint8_t alignment = (uint32_t)*esp % 4;
+  if (alignment != 0)
+    {
+      *esp -= alignment;
+      memset (*esp, 0, alignment);
+    }
+
+  *esp -= 4;
+  *(uint32_t *)*esp = 0;
+
+  for (int i = argc - 1; i >= 0; i--)
+    {
+      *esp -= 4;
+      *(uint32_t *)*esp = argv_addr[i];
+    }
+
+  uint32_t argv_head = (uint32_t)*esp;
+  *esp -= 4;
+  *(uint32_t *)*esp = argv_head;
+
+  *esp -= 4;
+  *(int *)*esp = argc;
+
+  *esp -= 4;
+  *(uint32_t *)*esp = 0;
+
+  palloc_free_page (cmd_copy);
+  return true;
 }
