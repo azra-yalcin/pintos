@@ -32,21 +32,19 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  /* 1. Tüm komut satırını tutacak kopyayı oluştur (start_process'e gidecek) */
+  /* Komut satırının tamamını start_process'e taşımak için kopyalıyoruz */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* 2. PROGRAM ADINI AYIKLAMAK İÇİN LOCAL ARRAY KULLANIYORUZ */
-  char fn_name[128]; /* Maksimum dosya adı uzunluğu */
+  /* thread_create'e sadece program adını (örn: "echo") vermek için ilk kelimeyi ayıklıyoruz */
+  char fn_name[128];
   char *save_ptr;
-
-  /* file_name'den ilk kelimeyi (program adını) güvenle çekiyoruz */
   strlcpy (fn_name, file_name, sizeof fn_name);
   char *first_word = strtok_r (fn_name, " ", &save_ptr);
 
-  /* 3. THREAD_CREATE'E ARTIK GÜVENLİ VE SİLİNMEYEN ADI VERİYORUZ */
+  /* Süreci başlat */
   tid = thread_create (first_word, PRI_DEFAULT, start_process, fn_copy);
 
   if (tid == TID_ERROR)
@@ -78,34 +76,20 @@ start_process (void *file_name_)
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
+     threads/intr-stubs.S). */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
 
-/* Waits for thread TID to die and returns its exit status.  If
-   it was terminated by the kernel (i.e. killed due to an
-   exception), returns -1.  If TID is invalid or if it was not a
-   child of the calling process, or if process_wait() has already
-   been successfully called for the given TID, returns -1
-   immediately, without waiting. */
+/* Waits for thread TID to die and returns its exit status. */
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  /* Ana thread'in önceliğini en düşüğe (0) çekiyoruz.
-     Böylece Hazır Kuyruğunda (ready_list) bekleyen çocuk thread (args-none)
-     en yüksek öncelikli hale gelecek ve işlemciyi anında kapacaktır. */
-  thread_current ()->priority = 0;
-
-  /* Çocuk thread'in çalışıp işini bitirmesi için geniş bir zaman tanıyoruz */
-  for (int i = 0; i < 500; i++) 
+  /* Geçici olarak ana thread'in takılı kalmasını engellemek için basit bir yield döngüsü */
+  for (int i = 0; i < 100; i++) 
     {
       thread_yield ();
     }
-
   return -1;
 } 
 
@@ -116,8 +100,6 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  /* Destroy the current process's page directory and switch back
-     to the kernel-only page directory. */
   pd = cur->pagedir;
   if (pd != NULL) 
     {
@@ -127,9 +109,7 @@ process_exit (void)
     }
 }
 
-/* Sets up the CPU for running user code in the current
-   thread.
-   This function is called on every context switch. */
+/* Sets up the CPU for running user code in the current thread. */
 void
 process_activate (void)
 {
@@ -138,26 +118,19 @@ process_activate (void)
   /* Activate thread's page tables. */
   pagedir_activate (t->pagedir);
 
-  /* Set thread's kernel stack for use in processing
-     interrupts. */
+  /* Set thread's kernel stack for use in processing interrupts. */
   tss_update ();
 }
-
-/* We load ELF binaries.  The following definitions are taken
-   from the ELF specification, [ELF1], more-or-less verbatim.  */
-
-/* ELF types.  See [ELF1] 1-2. */
+
+/* ELF veri tipleri ve tanımlamaları */
 typedef uint32_t Elf32_Word, Elf32_Addr, Elf32_Off;
 typedef uint16_t Elf32_Half;
 
-/* For use with ELF types in printf(). */
-#define PE32Wx PRIx32   /* Print Elf32_Word in hexadecimal. */
-#define PE32Ax PRIx32   /* Print Elf32_Addr in hexadecimal. */
-#define PE32Ox PRIx32   /* Print Elf32_Off in hexadecimal. */
-#define PE32Hx PRIx16   /* Print Elf32_Half in hexadecimal. */
+#define PE32Wx PRIx32
+#define PE32Ax PRIx32
+#define PE32Ox PRIx32
+#define PE32Hx PRIx16
 
-/* Executable header.  See [ELF1] 1-4 to 1-8.
-   This appears at the very beginning of an ELF binary. */
 struct Elf32_Ehdr
   {
     unsigned char e_ident[16];
@@ -176,9 +149,6 @@ struct Elf32_Ehdr
     Elf32_Half    e_shstrndx;
   };
 
-/* Program header.  See [ELF1] 2-2 to 2-4.
-   There are e_phnum of these, starting at file offset e_phoff
-   (see [ELF1] 1-6). */
 struct Elf32_Phdr
   {
     Elf32_Word p_type;
@@ -191,20 +161,18 @@ struct Elf32_Phdr
     Elf32_Word p_align;
   };
 
-/* Values for p_type.  See [ELF1] 2-3. */
-#define PT_NULL    0            /* Ignore. */
-#define PT_LOAD    1            /* Loadable segment. */
-#define PT_DYNAMIC 2            /* Dynamic linking info. */
-#define PT_INTERP  3            /* Name of dynamic loader. */
-#define PT_NOTE    4            /* Auxiliary info. */
-#define PT_SHLIB   5            /* Reserved. */
-#define PT_PHDR    6            /* Program header table. */
-#define PT_STACK   0x6474e551   /* Stack segment. */
+#define PT_NULL    0
+#define PT_LOAD    1
+#define PT_DYNAMIC 2
+#define PT_INTERP  3
+#define PT_NOTE    4
+#define PT_SHLIB   5
+#define PT_PHDR    6
+#define PT_STACK   0x6474e551
 
-/* Flags for p_flags.  See [ELF3] 2-3 and 2-4. */
-#define PF_X 1          /* Executable. */
-#define PF_W 2          /* Writable. */
-#define PF_R 4          /* Readable. */
+#define PF_X 1
+#define PF_W 2
+#define PF_R 4
 
 static bool setup_stack (void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
@@ -212,10 +180,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
-/* Loads an ELF executable from FILE_NAME into the current thread.
-   Stores the executable's entry point into *EIP
-   and its initial stack pointer into *ESP.
-   Returns true if successful, false otherwise. */
+/* Loads an ELF executable from FILE_NAME into the current thread. */
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
@@ -226,26 +191,25 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
-  /* 1. ADIM: Güvenli dosya adı ayıklama */
+  /* Dosya adını güvenle ayıklamak için lokal değişkenler */
   char *fn_name;
   char *save_ptr;
   
-  /* file_name_copy'yi fonksiyonun sonuna kadar hayatta tutacağız */
   char *file_name_copy = palloc_get_page (0);
   if (file_name_copy == NULL)
     goto done;
   strlcpy (file_name_copy, file_name, PGSIZE);
 
-  /* İlk boşluğa kadar olan dosya adını alıyoruz */
+  /* "echo hello" -> fn_name artık sadece "echo" */
   fn_name = strtok_r (file_name_copy, " ", &save_ptr);
 
-  /* Allocate and activate page directory. */
+  /* Activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
 
-  /* 2. ADIM: Dosyayı açma ve hata kontrolü */
+  /* Sadece ayıklanan temiz ismi açmaya çalışıyoruz */
   file = filesys_open (fn_name);
   
   printf ("#### DEBUG: load fonksiyonuna gelen file_name = '%s'\n", file_name);
@@ -253,13 +217,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   if (file == NULL) 
     {
-      printf ("#### DEBUG: DOSYA ACILAMADI! filesys_open NULL dondu.\n");
       printf ("load: %s: open failed\n", file_name);
       goto done; 
-    }
-  else 
-    {
-      printf ("#### DEBUG: DOSYA BASARIYLA ACILDI!\n");
     }
 
   /* Read and verify executable header. */
@@ -295,7 +254,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
         case PT_PHDR:
         case PT_STACK:
         default:
-          /* Ignore this segment. */
           break;
         case PT_DYNAMIC:
         case PT_INTERP:
@@ -334,7 +292,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
-  /* 3. ADIM: Kelimeleri Yığına Dizme */
+  /* Argümanları Stack'e dizen motoru çağırıyoruz */
   if (!push_arguments (file_name, esp))
     goto done;
 
@@ -343,7 +301,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
 done:
-  /* 4. ADIM: Temizlik işlemlerini tek bir merkezden güvenle yapıyoruz */
+  /* Ayrılan geçici bellek sayfasını güvenle temizliyoruz */
   if (file_name_copy != NULL)
     palloc_free_page (file_name_copy);
     
@@ -351,53 +309,31 @@ done:
   return success;
 }
 
-/* load() helpers. */
-
+/* load() yardımcı fonksiyonları */
 static bool install_page (void *upage, void *kpage, bool writable);
 
-/* Checks whether PHDR describes a valid, loadable segment in
-   FILE and returns true if so, false otherwise. */
 static bool
 validate_segment (const struct Elf32_Phdr *phdr, struct file *file) 
 {
-  /* p_offset and p_vaddr must have the same page offset. */
   if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK)) 
     return false; 
-
-  /* p_offset must point within FILE. */
   if (phdr->p_offset > (Elf32_Off) file_length (file)) 
     return false;
-
-  /* p_memsz must be at least as big as p_filesz. */
   if (phdr->p_memsz < phdr->p_filesz) 
     return false; 
-
-  /* The segment must not be empty. */
   if (phdr->p_memsz == 0)
     return false;
-  
-  /* The virtual memory region must both start and end within the
-     user address space range. */
   if (!is_user_vaddr ((void *) phdr->p_vaddr))
     return false;
   if (!is_user_vaddr ((void *) (phdr->p_vaddr + phdr->p_memsz)))
     return false;
-
-  /* The region cannot "wrap around" across the kernel virtual
-     address space. */
   if (phdr->p_vaddr + phdr->p_memsz < phdr->p_vaddr)
     return false;
-
-  /* Disallow mapping page 0. */
   if (phdr->p_vaddr < PGSIZE)
     return false;
-
-  /* It's okay. */
   return true;
 }
 
-/* Loads a segment starting at offset OFS in FILE at address
-   UPAGE. */
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
@@ -436,8 +372,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   return true;
 }
 
-/* Create a minimal stack by mapping a zeroed page at the top of
-   user virtual memory. */
 static bool
 setup_stack (void **esp) 
 {
@@ -456,18 +390,15 @@ setup_stack (void **esp)
   return success;
 }
 
-/* Adds a mapping from user virtual address UPAGE to kernel
-   virtual address KPAGE to the page table. */
 static bool
 install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();
-
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
-/* --- MOTOR FONKSİYON: ARGÜMANLARI STACK'E DİZEN KISIM --- */
+/* --- X86 STACK KURALLARINA UYGUN ARGÜMAN DİZİLİM MOTORU --- */
 static bool
 push_arguments (const char *file_name, void **esp)
 {
