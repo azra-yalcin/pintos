@@ -234,6 +234,20 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
+  /* --- 1. DEĞİŞİKLİK BAŞLANGICI: İLK KELİMEYİ (PROGRAM ADINI) AYIKLAMA --- */
+  char *fn_name;
+  char *save_ptr;
+  
+  /* file_name const olduğu için üzerinde strtok_r çalıştıramayız. Geçici kopya alıyoruz. */
+  char *file_name_copy = palloc_get_page (0);
+  if (file_name_copy == NULL)
+    goto done;
+  strlcpy (file_name_copy, file_name, PGSIZE);
+
+  /* İlk boşluğa kadar olan dosya adını alıyoruz (Örn: "echo hello" -> "echo") */
+  fn_name = strtok_r (file_name_copy, " ", &save_ptr);
+  /* --- 1. DEĞİŞİKLİK BİTİŞİ --- */
+
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -241,7 +255,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  /* DİKKAT: Artık file_name değil, ayıkladığımız fn_name'i açıyoruz! */
+  file = filesys_open (fn_name);
+  
+  /* İşimiz bittiği için geçici kopyayı hemen silebiliriz */
+  palloc_free_page (file_name_copy);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -323,6 +342,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
+  /* --- 2. DEĞİŞİKLİK BAŞLANGICI: KELİMELERİ YIĞINA DİZME --- */
+  /* Stack başarıyla kurulduktan sonra, tüm komut satırını alıp yığına diziyoruz */
+  if (!push_arguments (file_name, esp))
+    goto done;
+  /* --- 2. DEĞİŞİKLİK BİTİŞİ --- */
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
