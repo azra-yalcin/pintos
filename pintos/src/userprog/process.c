@@ -1,4 +1,3 @@
-cat << 'EOF' > ../process.c
 #include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -430,4 +429,3 @@ push_arguments (const char *file_name, void **esp)
   palloc_free_page (cmd_copy);
   return true;
 }
-EOF
