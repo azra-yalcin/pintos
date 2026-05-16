@@ -32,6 +32,14 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+/* Forward declarations for priority comparators. */
+static bool priority_sema_greater (const struct list_elem *a,
+                                   const struct list_elem *b,
+                                   void *aux UNUSED);
+static bool priority_cond_greater (const struct list_elem *a,
+                                   const struct list_elem *b,
+                                   void *aux UNUSED);
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -140,14 +148,6 @@ sema_up (struct semaphore *sema)
 }
 
 static void sema_test_helper (void *sema_);
-
-/* Forward declarations for priority comparators. */
-static bool priority_sema_greater (const struct list_elem *a,
-                                   const struct list_elem *b,
-                                   void *aux UNUSED);
-static bool priority_cond_greater (const struct list_elem *a,
-                                   const struct list_elem *b,
-                                   void *aux UNUSED);
 
 /* Self-test for semaphores that makes control "ping-pong"
    between a pair of threads.  Insert calls to printf() to see
