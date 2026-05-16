@@ -107,6 +107,13 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  /* ÖNEMLİ: Bu geçici bir çözümdür.
+     Çocuk süreç çalışıp ekrana yazısını basabilsin diye ana thread'i 
+     burada sonsuz döngüye sokarak zaman kazanıyoruz. */
+  while (1) 
+    {
+      thread_yield ();
+    }
   return -1;
 }
 
