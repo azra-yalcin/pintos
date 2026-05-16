@@ -141,6 +141,14 @@ sema_up (struct semaphore *sema)
 
 static void sema_test_helper (void *sema_);
 
+/* Forward declarations for priority comparators. */
+static bool priority_sema_greater (const struct list_elem *a,
+                                   const struct list_elem *b,
+                                   void *aux UNUSED);
+static bool priority_cond_greater (const struct list_elem *a,
+                                   const struct list_elem *b,
+                                   void *aux UNUSED);
+
 /* Self-test for semaphores that makes control "ping-pong"
    between a pair of threads.  Insert calls to printf() to see
    what's going on. */
