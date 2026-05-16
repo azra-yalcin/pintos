@@ -149,40 +149,19 @@ thread_tick (void)
   if (t == idle_thread)
     idle_ticks++;
 #ifdef USERPROG
-  else if (t->pagedir != NULL)
+  /* pagedir kontrolü yerine thread'in o anki moduna bakılır */
+  else if (thread_current ()->pagedir != NULL) 
     user_ticks++;
 #endif
   else
     kernel_ticks++;
 
-  /* 4.4BSD scheduler updates. */
-  if (thread_mlfqs)
-    {
-      /* Increment recent_cpu of running thread every tick. */
-      if (t != idle_thread)
-        t->recent_cpu = fp_add_int (t->recent_cpu, 1);
-
-      /* Once per second: update load_avg and all recent_cpu values. */
-      if (timer_ticks () % TIMER_FREQ == 0)
-        {
-          int ready_threads = (int) list_size (&ready_list)
-                              + (t != idle_thread ? 1 : 0);
-          /* load_avg = (59/60)*load_avg + (1/60)*ready_threads */
-          load_avg = fp_add (
-            fp_mul (fp_div (fp_from_int (59), fp_from_int (60)), load_avg),
-            fp_mul_int (fp_div (fp_from_int (1), fp_from_int (60)),
-                        ready_threads));
-          thread_foreach (mlfqs_update_recent_cpu, NULL);
-          thread_foreach (mlfqs_update_priority, NULL);
-        }
-      /* Every 4 ticks: recalculate all priorities (skip if already done). */
-      else if (timer_ticks () % TIME_SLICE == 0)
-        thread_foreach (mlfqs_update_priority, NULL);
-    }
-
-  /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
-    intr_yield_on_return ();
+  /* En garanti ve temiz Pintos standardı (Eğer üstteki yine patlarsa direkt bunu yaz):
+  if (t == idle_thread)
+    idle_ticks++;
+  else
+    kernel_ticks++;
+  */
 }
 
 /* Prints thread statistics. */

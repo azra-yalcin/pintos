@@ -1,3 +1,4 @@
+cat << 'EOF' > ../process.c
 #include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -22,29 +23,22 @@ static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static bool push_arguments (const char *file_name, void **esp);
 
-/* Starts a new thread running a user program loaded from
-   FILENAME.  The new thread may be scheduled (and may even exit)
-   before process_execute() returns.  Returns the new process's
-   thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
   tid_t tid;
 
-  /* Komut satırının tamamını start_process'e taşımak için kopyalıyoruz */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* thread_create'e sadece program adını (örn: "echo") vermek için ilk kelimeyi ayıklıyoruz */
   char fn_name[128];
   char *save_ptr;
   strlcpy (fn_name, file_name, sizeof fn_name);
   char *first_word = strtok_r (fn_name, " ", &save_ptr);
 
-  /* Süreci başlat */
   tid = thread_create (first_word, PRI_DEFAULT, start_process, fn_copy);
 
   if (tid == TID_ERROR)
@@ -53,8 +47,6 @@ process_execute (const char *file_name)
   return tid;
 }
 
-/* A thread function that loads a user process and starts it
-   running. */
 static void
 start_process (void *file_name_)
 {
@@ -62,30 +54,23 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
-  /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
 
-  /* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S). */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
 
-/* Waits for thread TID to die and returns its exit status. */
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  /* Geçici olarak ana thread'in takılı kalmasını engellemek için basit bir yield döngüsü */
   for (int i = 0; i < 100; i++) 
     {
       thread_yield ();
@@ -93,7 +78,6 @@ process_wait (tid_t child_tid UNUSED)
   return -1;
 } 
 
-/* Free the current process's resources. */
 void
 process_exit (void)
 {
@@ -109,20 +93,14 @@ process_exit (void)
     }
 }
 
-/* Sets up the CPU for running user code in the current thread. */
 void
 process_activate (void)
 {
   struct thread *t = thread_current ();
-
-  /* Activate thread's page tables. */
   pagedir_activate (t->pagedir);
-
-  /* Set thread's kernel stack for use in processing interrupts. */
   tss_update ();
 }
-
-/* ELF veri tipleri ve tanımlamaları */
+
 typedef uint32_t Elf32_Word, Elf32_Addr, Elf32_Off;
 typedef uint16_t Elf32_Half;
 
@@ -180,7 +158,6 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
-/* Loads an ELF executable from FILE_NAME into the current thread. */
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
@@ -191,37 +168,34 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
-  /* Dosya adını güvenle ayıklamak için lokal değişkenler */
+  printf ("#### CRITICAL DEBUG: load basladi. file_name = '%s'\n", file_name);
+
   char *fn_name;
   char *save_ptr;
-  
   char *file_name_copy = palloc_get_page (0);
   if (file_name_copy == NULL)
     goto done;
   strlcpy (file_name_copy, file_name, PGSIZE);
 
-  /* "echo hello" -> fn_name artık sadece "echo" */
   fn_name = strtok_r (file_name_copy, " ", &save_ptr);
+  printf ("#### CRITICAL DEBUG: strtok_r bitti. fn_name = '%s'\n", fn_name);
 
-  /* Activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
     goto done;
-  process_activate ();
-
-  /* Sadece ayıklanan temiz ismi açmaya çalışıyoruz */
-  file = filesys_open (fn_name);
+  printf ("#### CRITICAL DEBUG: pagedir_create bitti.\n");
   
-  printf ("#### DEBUG: load fonksiyonuna gelen file_name = '%s'\n", file_name);
-  printf ("#### DEBUG: Ayıklanan fn_name = '%s'\n", fn_name);
+  process_activate ();
+  printf ("#### CRITICAL DEBUG: process_activate bitti.\n");
 
+  file = filesys_open (fn_name);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+  printf ("#### CRITICAL DEBUG: filesys_open basarili.\n");
 
-  /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
       || ehdr.e_type != 2
@@ -233,8 +207,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: error loading executable\n", file_name);
       goto done; 
     }
+  printf ("#### CRITICAL DEBUG: ELF basligi dogrulandi.\n");
 
-  /* Read program headers. */
   file_ofs = ehdr.e_phoff;
   for (i = 0; i < ehdr.e_phnum; i++) 
     {
@@ -287,21 +261,20 @@ load (const char *file_name, void (**eip) (void), void **esp)
           break;
         }
     }
+  printf ("#### CRITICAL DEBUG: Segment yuklemeleri bitti.\n");
 
-  /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+  printf ("#### CRITICAL DEBUG: setup_stack bitti. ESP adresi = %p\n", *esp);
 
-  /* Argümanları Stack'e dizen motoru çağırıyoruz */
   if (!push_arguments (file_name, esp))
     goto done;
+  printf ("#### CRITICAL DEBUG: push_arguments sorunsuz bitti.\n");
 
-  /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
   success = true;
 
 done:
-  /* Ayrılan geçici bellek sayfasını güvenle temizliyoruz */
   if (file_name_copy != NULL)
     palloc_free_page (file_name_copy);
     
@@ -309,7 +282,6 @@ done:
   return success;
 }
 
-/* load() yardımcı fonksiyonları */
 static bool install_page (void *upage, void *kpage, bool writable);
 
 static bool
@@ -398,7 +370,6 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
-/* --- X86 STACK KURALLARINA UYGUN ARGÜMAN DİZİLİM MOTORU --- */
 static bool
 push_arguments (const char *file_name, void **esp)
 {
@@ -459,3 +430,4 @@ push_arguments (const char *file_name, void **esp)
   palloc_free_page (cmd_copy);
   return true;
 }
+EOF
