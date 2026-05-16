@@ -227,6 +227,84 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Returns true if successful, false otherwise. */
    /* load fonksiyonunun en başına ekle */
 printf ("#### DEBUG: load fonksiyonuna gelen file_name = '%s'\n", file_name);
+static bool
+push_arguments (const char *file_name, void **esp)
+{
+  /* 1. Argümanları saymak ve geçici olarak saklamak için değişkenler */
+  char *token;
+  char *save_ptr;
+  int argc = 0;
+  
+  /* Pintos'ta komut satırı sınırı güvenli olsun diye max 64 argüman destekliyoruz */
+  char *argv[64]; 
+  uint32_t argv_addr[64];
+
+  /* file_name const olduğu için üzerinde strtok_r çalıştıramayız. Geçici kopya alıyoruz. */
+  char *cmd_copy = palloc_get_page (0);
+  if (cmd_copy == NULL)
+    return false;
+  strlcpy (cmd_copy, file_name, PGSIZE);
+
+  /* 2. ADIM: String Parçalama (Tokenization)
+     Kelimeleri tek tek ayıklayıp argv dizisine atıyoruz (Örn: "echo hello" -> ["echo", "hello"]) */
+  for (token = strtok_r (cmd_copy, " ", &save_ptr); token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr))
+    {
+      argv[argc] = token;
+      argc++;
+      if (argc >= 64) /* Taşma kontrolü */
+        break;
+    }
+
+  /* 3. ADIM: Kelimeleri Sağdan Sola Stack'e İtme (Pushing Strings)
+     x86 Stack yapısı yukarıdan aşağıya (yüksek adresten düşük adrese) büyür. */
+  for (int i = argc - 1; i >= 0; i--)
+    {
+      size_t len = strlen (argv[i]) + 1; /* \0 bitiş karakteri dahil */
+      *esp -= len;                       /* Yığında yer aç */
+      memcpy (*esp, argv[i], len);       /* Kelimeyi yığına kopyala */
+      argv_addr[i] = (uint32_t)*esp;     /* Kelimenin yığındaki adresini kaydet */
+    }
+
+  /* 4. ADIM: Word Alignment (4 Baytlık Hizalama)
+     İşlemcinin veriyi hızlı okuması için adresi 4'ün katına yuvarlıyoruz */
+  uint8_t alignment = (uint32_t)*esp % 4;
+  if (alignment != 0)
+    {
+      *esp -= alignment;
+      memset (*esp, 0, alignment); /* Boş kalan yerleri sıfırla doldur */
+    }
+
+  /* 5. ADIM: argv[argc] için NULL Değeri Koyma
+     C standartlarında argv dizisinin son elemanı her zaman NULL olmalıdır. */
+  *esp -= 4;
+  *(uint32_t *)*esp = 0;
+
+  /* 6. ADIM: Kelimelerin Adreslerini Yığına İtme (Pushing Pointers) */
+  for (int i = argc - 1; i >= 0; i--)
+    {
+      *esp -= 4;
+      *(uint32_t *)*esp = argv_addr[i];
+    }
+
+  /* 7. ADIM: argv İşaretçisinin Kendisini İtme */
+  uint32_t argv_head = (uint32_t)*esp;
+  *esp -= 4;
+  *(uint32_t *)*esp = argv_head;
+
+  /* 8. ADIM: argc Değerini (Argüman Sayısı) İtme */
+  *esp -= 4;
+  *(int *)*esp = argc;
+
+  /* 9. ADIM: Dönüş Adresi (Return Address) için Sahte NULL Puanı
+     Kullanıcı programı main() bittiğinde dönecek yer arar, buraya 0 koyuyoruz */
+  *esp -= 4;
+  *(uint32_t *)*esp = 0;
+
+  /* Geçici sayfayı serbest bırak */
+  palloc_free_page (cmd_copy);
+  return true;
+}
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
