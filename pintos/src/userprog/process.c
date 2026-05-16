@@ -228,83 +228,9 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    /* load fonksiyonunun en başına ekle */
 printf ("#### DEBUG: load fonksiyonuna gelen file_name = '%s'\n", file_name);
 static bool
-push_arguments (const char *file_name, void **esp)
-{
-  /* 1. Argümanları saymak ve geçici olarak saklamak için değişkenler */
-  char *token;
-  char *save_ptr;
-  int argc = 0;
-  
-  /* Pintos'ta komut satırı sınırı güvenli olsun diye max 64 argüman destekliyoruz */
-  char *argv[64]; 
-  uint32_t argv_addr[64];
+/* load fonksiyonundan önce push_arguments fonksiyonunun varlığını derleyiciye bildiriyoruz */
+static bool push_arguments (const char *file_name, void **esp);
 
-  /* file_name const olduğu için üzerinde strtok_r çalıştıramayız. Geçici kopya alıyoruz. */
-  char *cmd_copy = palloc_get_page (0);
-  if (cmd_copy == NULL)
-    return false;
-  strlcpy (cmd_copy, file_name, PGSIZE);
-
-  /* 2. ADIM: String Parçalama (Tokenization)
-     Kelimeleri tek tek ayıklayıp argv dizisine atıyoruz (Örn: "echo hello" -> ["echo", "hello"]) */
-  for (token = strtok_r (cmd_copy, " ", &save_ptr); token != NULL;
-       token = strtok_r (NULL, " ", &save_ptr))
-    {
-      argv[argc] = token;
-      argc++;
-      if (argc >= 64) /* Taşma kontrolü */
-        break;
-    }
-
-  /* 3. ADIM: Kelimeleri Sağdan Sola Stack'e İtme (Pushing Strings)
-     x86 Stack yapısı yukarıdan aşağıya (yüksek adresten düşük adrese) büyür. */
-  for (int i = argc - 1; i >= 0; i--)
-    {
-      size_t len = strlen (argv[i]) + 1; /* \0 bitiş karakteri dahil */
-      *esp -= len;                       /* Yığında yer aç */
-      memcpy (*esp, argv[i], len);       /* Kelimeyi yığına kopyala */
-      argv_addr[i] = (uint32_t)*esp;     /* Kelimenin yığındaki adresini kaydet */
-    }
-
-  /* 4. ADIM: Word Alignment (4 Baytlık Hizalama)
-     İşlemcinin veriyi hızlı okuması için adresi 4'ün katına yuvarlıyoruz */
-  uint8_t alignment = (uint32_t)*esp % 4;
-  if (alignment != 0)
-    {
-      *esp -= alignment;
-      memset (*esp, 0, alignment); /* Boş kalan yerleri sıfırla doldur */
-    }
-
-  /* 5. ADIM: argv[argc] için NULL Değeri Koyma
-     C standartlarında argv dizisinin son elemanı her zaman NULL olmalıdır. */
-  *esp -= 4;
-  *(uint32_t *)*esp = 0;
-
-  /* 6. ADIM: Kelimelerin Adreslerini Yığına İtme (Pushing Pointers) */
-  for (int i = argc - 1; i >= 0; i--)
-    {
-      *esp -= 4;
-      *(uint32_t *)*esp = argv_addr[i];
-    }
-
-  /* 7. ADIM: argv İşaretçisinin Kendisini İtme */
-  uint32_t argv_head = (uint32_t)*esp;
-  *esp -= 4;
-  *(uint32_t *)*esp = argv_head;
-
-  /* 8. ADIM: argc Değerini (Argüman Sayısı) İtme */
-  *esp -= 4;
-  *(int *)*esp = argc;
-
-  /* 9. ADIM: Dönüş Adresi (Return Address) için Sahte NULL Puanı
-     Kullanıcı programı main() bittiğinde dönecek yer arar, buraya 0 koyuyoruz */
-  *esp -= 4;
-  *(uint32_t *)*esp = 0;
-
-  /* Geçici sayfayı serbest bırak */
-  palloc_free_page (cmd_copy);
-  return true;
-}
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
@@ -315,19 +241,18 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
-  /* --- 1. DEĞİŞİKLİK BAŞLANGICI: İLK KELİMEYİ (PROGRAM ADINI) AYIKLAMA --- */
+  /* 1. ADIM: Güvenli dosya adı ayıklama */
   char *fn_name;
   char *save_ptr;
   
-  /* file_name const olduğu için üzerinde strtok_r çalıştıramayız. Geçici kopya alıyoruz. */
+  /* file_name_copy'yi fonksiyonun sonuna kadar hayatta tutacağız */
   char *file_name_copy = palloc_get_page (0);
   if (file_name_copy == NULL)
     goto done;
   strlcpy (file_name_copy, file_name, PGSIZE);
 
-  /* İlk boşluğa kadar olan dosya adını alıyoruz (Örn: "echo hello" -> "echo") */
+  /* İlk boşluğa kadar olan dosya adını alıyoruz */
   fn_name = strtok_r (file_name_copy, " ", &save_ptr);
-  /* --- 1. DEĞİŞİKLİK BİTİŞİ --- */
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -335,11 +260,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  /* Open executable file. */
-  /* DİKKAT: Artık file_name değil, ayıkladığımız fn_name'i açıyoruz! */
+  /* 2. ADIM: Dosyayı açma ve hata kontrolü */
   file = filesys_open (fn_name);
-  /* file = filesys_open (fn_name); satırının hemen altına ekle */
+  
+  printf ("#### DEBUG: load fonksiyonuna gelen file_name = '%s'\n", file_name);
   printf ("#### DEBUG: Ayıklanan fn_name = '%s'\n", fn_name);
+
   if (file == NULL) 
     {
       printf ("#### DEBUG: DOSYA ACILAMADI! filesys_open NULL dondu.\n");
@@ -349,15 +275,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   else 
     {
       printf ("#### DEBUG: DOSYA BASARIYLA ACILDI!\n");
-    }
-  
-  /* İşimiz bittiği için geçici kopyayı hemen silebiliriz */
-  palloc_free_page (file_name_copy);
-
-  if (file == NULL) 
-    {
-      printf ("load: %s: open failed\n", file_name);
-      goto done; 
     }
 
   /* Read and verify executable header. */
@@ -409,16 +326,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
               uint32_t read_bytes, zero_bytes;
               if (phdr.p_filesz > 0)
                 {
-                  /* Normal segment.
-                     Read initial part from disk and zero the rest. */
                   read_bytes = page_offset + phdr.p_filesz;
                   zero_bytes = (ROUND_UP (page_offset + phdr.p_memsz, PGSIZE)
                                 - read_bytes);
                 }
               else 
                 {
-                  /* Entirely zero.
-                     Don't read anything from disk. */
                   read_bytes = 0;
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
@@ -436,19 +349,19 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
-  /* --- 2. DEĞİŞİKLİK BAŞLANGICI: KELİMELERİ YIĞINA DİZME --- */
-  /* Stack başarıyla kurulduktan sonra, tüm komut satırını alıp yığına diziyoruz */
+  /* 3. ADIM: Kelimeleri Yığına Dizme */
   if (!push_arguments (file_name, esp))
     goto done;
-  /* --- 2. DEĞİŞİKLİK BİTİŞİ --- */
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
-
   success = true;
 
- done:
-  /* We arrive here whether the load is successful or not. */
+done:
+  /* 4. ADIM: Temizlik işlemlerini tek bir merkezden güvenle yapıyoruz */
+  if (file_name_copy != NULL)
+    palloc_free_page (file_name_copy);
+    
   file_close (file);
   return success;
 }
