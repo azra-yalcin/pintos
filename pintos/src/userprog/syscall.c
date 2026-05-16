@@ -5,6 +5,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
+#include "userprog/pagedir.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -22,7 +23,7 @@ sys_exit (int status)
 }
 
 /* Ekrana (Konsola) yazı yazılmasını sağlayan fonksiyon */
-int
+static int
 sys_write (int fd, const void *buffer, unsigned size)
 {
   /* fd == 1, standart çıktı (STDOUT - Konsol ekranı) demektir */
