@@ -31,15 +31,34 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  /* Make a copy of FILE_NAME.
-     Otherwise there's a race between the caller and load(). */
+  /* 1. FILE_NAME'in kopyasını oluştur (Bu kısım aynı kalıyor) */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  /* 2. PROGRAM ADINI AYIKLAMAK İÇİN EKLEYECEĞİN KISIM */
+  char *fn_name;      /* Sadece program adını tutacak (Örn: "echo") */
+  char *save_ptr;     /* strtok_r için gerekli güvenli işaretçi */
+
+  /* file_name'i doğrudan değiştiremeyiz (const çünkü), o yüzden fn_copy'den 
+     ya da geçici bir kopyadan ilk kelimeyi çekmeliyiz. */
+  char *file_name_copy = palloc_get_page(0);
+  if (file_name_copy == NULL) {
+    palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+  strlcpy(file_name_copy, file_name, PGSIZE);
+
+  /* İlk boşluğa kadar olan kısmı (program adını) alıyoruz */
+  fn_name = strtok_r (file_name_copy, " ", &save_ptr);
+
+  /* 3. ARTIK THREAD_CREATE'E TÜM STRING'I DEĞİL, SADECE PROGRAM ADINI VERİYORUZ */
+  tid = thread_create (fn_name, PRI_DEFAULT, start_process, fn_copy);
+
+  /* İşimiz bittiğinde geçici kopyayı serbest bırakıyoruz */
+  palloc_free_page(file_name_copy);
+
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
